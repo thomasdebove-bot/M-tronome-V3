@@ -1139,6 +1139,22 @@ LAYOUT_CONTROLS_JS = r"""
       }
     }
   }
+  function adjustSpace(zone, delta){
+    if(!zone) return;
+    const spacer = zone.querySelector('.zoneSpacer');
+    if(!spacer) return;
+    const current = parseFloat(spacer.dataset.space || '0');
+    const next = Math.max(0, current + delta);
+    spacer.dataset.space = String(next);
+    spacer.style.height = `${next}mm`;
+  }
+  function resetSpace(zone){
+    if(!zone) return;
+    const spacer = zone.querySelector('.zoneSpacer');
+    if(!spacer) return;
+    spacer.dataset.space = '0';
+    spacer.style.height = '0mm';
+  }
   document.addEventListener('click', (e) => {
     const btn = e.target.closest('.zoneBtn');
     if(!btn) return;
@@ -1149,6 +1165,12 @@ LAYOUT_CONTROLS_JS = r"""
       zone.classList.toggle('highlight');
     }else if(action === 'page-break'){
       zone.classList.toggle('pageBreakBefore');
+    }else if(action === 'space-up'){
+      adjustSpace(zone, 5);
+    }else if(action === 'space-down'){
+      adjustSpace(zone, -5);
+    }else if(action === 'space-reset'){
+      resetSpace(zone);
     }else if(action === 'move-up'){
       move(zone, 'up');
     }else if(action === 'move-down'){
@@ -1856,6 +1878,9 @@ def render_cr(
               <button class="zoneBtn" type="button" data-action="move-down">↓</button>
               <button class="zoneBtn" type="button" data-action="highlight">Surligner</button>
               <button class="zoneBtn" type="button" data-action="page-break">Saut de page</button>
+              <button class="zoneBtn" type="button" data-action="space-up">Espace +</button>
+              <button class="zoneBtn" type="button" data-action="space-down">Espace -</button>
+              <button class="zoneBtn" type="button" data-action="space-reset">Espace 0</button>
                                                         <button class="btnAddMemo" type="button" data-area="{zt}">+ Ajouter mémo</button>
             </div>
           </div>
@@ -1884,6 +1909,7 @@ def render_cr(
               {rows_html}
             </tbody>
           </table>
+          <div class="zoneSpacer" data-space="0" style="height:0mm"></div>
         </div>
         """
 
@@ -2014,6 +2040,7 @@ def render_cr(
   --page-margin-left:8mm;
   --page-bleed:0mm;
   --base-font-size:14px;
+  --page-gap:12mm;
   --kpi-cols:4;
   --top-scale:1;
 }}
@@ -2042,6 +2069,24 @@ body{{padding:14px 14px 14px 280px;}}
   pointer-events:none;
 }}
 .page--cover .pageContent{{padding-top:0;}}
+.pageStack{{width:100%;min-height:var(--a4-height);}}
+@media screen{{
+  .page--report{{background:#e5e7eb;}}
+  .page--report .pageContent{{background:transparent;}}
+  .pageStack{{
+    padding-bottom:var(--page-gap);
+    background-image:repeating-linear-gradient(
+      to bottom,
+      #ffffff 0,
+      #ffffff var(--a4-height),
+      #e5e7eb var(--a4-height),
+      #e5e7eb calc(var(--a4-height) + var(--page-gap))
+    );
+    background-size:100% calc(var(--a4-height) + var(--page-gap));
+    background-repeat:repeat-y;
+    box-shadow:0 0 0 1px #cbd5e1 inset;
+  }}
+}}
 .muted{{color:var(--muted)}}
 .small{{font-size:12px}}
 .noPrint{{}}
@@ -2120,6 +2165,13 @@ body{{padding:14px 14px 14px 280px;}}
 .zoneBlock.highlight{{box-shadow:0 0 0 2px #f59e0b inset; background:linear-gradient(180deg,#fff7ed,#fff)}}
 .zoneBlock.pageBreakBefore{{page-break-before:always}}
 .zoneBlock.pageBreakBefore .zoneTitle::after{{content:"Saut de page";margin-left:10px;color:#1d4ed8;font-weight:900;}}
+.zoneSpacer{{width:100%;height:0;}}
+@media screen{{
+  .zoneSpacer{{background:repeating-linear-gradient(90deg,#e2e8f0 0,#e2e8f0 6px,#f8fafc 6px,#f8fafc 12px);border:1px dashed #cbd5e1;border-radius:8px;margin-top:8px;}}
+}}
+@media print{{
+  .zoneSpacer{{background:none;border:none;margin-top:0}}
+}}
 .u-page-break{{break-before:page;page-break-before:always;}}
 .u-avoid-break{{break-inside:avoid;page-break-inside:avoid;}}
 
@@ -2412,6 +2464,7 @@ body{{padding:14px 14px 14px 280px;}}
 
     <section class="page page--report">
       <div class="pageContent">
+        <div class="pageStack">
         <div class="reportTables">
           {report_header_html}
           {presence_html}
@@ -2421,6 +2474,7 @@ body{{padding:14px 14px 14px 280px;}}
           <div class="muted" style="font-weight:800">
             TEMPO • Document généré automatiquement — vérifier les échéances critiques avant diffusion.
           </div>
+        </div>
         </div>
       </div>
       <div class="docFooter">
