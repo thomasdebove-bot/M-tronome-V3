@@ -1943,7 +1943,7 @@ body{{padding:14px 14px 14px 280px;}}
 .wrap{{display:flex;flex-direction:column;gap:12px;align-items:center;}}
 .page{{width:210mm;min-height:297mm;position:relative;background:#fff;overflow:visible;break-after:page;page-break-after:always;}}
 .page:last-child{{break-after:auto;page-break-after:auto;}}
-.pageContent{{padding:10mm 8mm 16mm 8mm;}}
+.pageContent{{padding:10mm 8mm 22mm 8mm;}}
 .page--cover .pageContent{{padding-top:0;}}
 .muted{{color:var(--muted)}}
 .small{{font-size:12px}}
@@ -1960,7 +1960,7 @@ body{{padding:14px 14px 14px 280px;}}
 .coverHeroCurve{{position:absolute;left:50%;bottom:-95px;width:135%;height:190px;transform:translateX(-50%);background:#fff;border-radius:50% 50% 0 0 / 100% 100% 0 0;z-index:2}}
 .coverHeroLogoWrap{{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);z-index:4;background:#fff;padding:10px 18px;border-radius:8px;box-shadow:0 6px 18px rgba(2,6,23,.12)}}
 .coverHeroLogo{{height:110px;width:auto;display:block}}
-.coverNoteCenter{{text-align:center;padding:2px 10px 8px 10px;font-weight:900}}
+.coverNoteCenter{{text-align:center;padding:2px 10px 8px 10px;font-weight:900;margin-top:16mm}}
 .coverProjectTitle{{font-family:"Arial Nova Cond Light","Arial Narrow",Arial,sans-serif;font-size:22px;line-height:1.2;color:#f59e0b;font-weight:700;letter-spacing:.5px;text-transform:uppercase}}
 .coverCrTitle{{margin-top:10px;font-family:"Arial Nova Cond Light","Arial Narrow",Arial,sans-serif;font-size:22px;line-height:1.2;color:#0f3a40;font-weight:700}}
 .coverCrMeta{{margin-top:8px;font-family:"Arial Nova Cond Light","Arial Narrow",Arial,sans-serif;font-size:22px;line-height:1.2;color:#0f3a40;font-weight:700}}
@@ -2087,8 +2087,9 @@ body{{padding:14px 14px 14px 280px;}}
 .crTable{{width:100%;border-collapse:collapse;table-layout:fixed;border:1px solid var(--border);margin-top:-1px;}}
 .crTable thead{{display:table-header-group}}
 .crTable tfoot{{display:table-footer-group}}
-.crTable th, .crTable td{{border:1px solid var(--border);padding:7px 8px;vertical-align:top;page-break-inside:avoid;break-inside:avoid;}}
-.crTable tr{{page-break-inside:avoid;break-inside:avoid;}}
+.crTable th, .crTable td{{border:1px solid var(--border);padding:7px 8px;vertical-align:top;page-break-inside:auto;break-inside:auto;}}
+.crTable tr{{page-break-inside:auto;break-inside:auto;}}
+.sessionSubRow{{page-break-inside:avoid;break-inside:avoid;}}
 .annexTable tr{{page-break-inside:avoid;break-inside:avoid;}}
 .crTable th{{background:#1f4e4f;color:#fff;text-align:center;font-weight:900;font-size:11px;line-height:1.2;white-space:nowrap}}
 .crTable td{{font-size:11px;line-height:1.3;word-break:normal;overflow-wrap:break-word;hyphens:none}}
@@ -2142,9 +2143,9 @@ body{{padding:14px 14px 14px 280px;}}
 .reportHeader .accent{{color:#f59e0b;font-weight:900}}
 .presenceTable .presenceList{{margin:0;padding-left:0;list-style:none;display:flex;flex-direction:column;gap:6px}}
 .presenceTable .presenceLine{{display:flex;align-items:center;gap:8px;font-weight:700}}
-.docFooter{{position:absolute;left:0;right:0;bottom:0;height:12mm;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:2mm 6mm;border-top:1px solid #dbe5f0;background:#fff;overflow:hidden;width:100%;box-sizing:border-box}}
-.docFooter::before{{content:"";position:absolute;left:0;bottom:0;width:110px;height:26px;background:#123f45;clip-path:polygon(0 100%,100% 100%,0 0)}}
-.docFooter::after{{content:"";position:absolute;right:0;bottom:0;width:160px;height:36px;background:#123f45;clip-path:polygon(100% 0,100% 100%,0 100%)}}
+.docFooter{{position:absolute;left:0;right:0;bottom:0;height:18mm;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:2.5mm 7mm;border-top:1px solid #dbe5f0;background:#fff;overflow:hidden;width:100%;box-sizing:border-box}}
+.docFooter::before{{content:"";position:absolute;left:0;bottom:0;width:140px;height:34px;background:#123f45;clip-path:polygon(0 100%,100% 100%,0 0)}}
+.docFooter::after{{content:"";position:absolute;right:0;bottom:0;width:200px;height:48px;background:#123f45;clip-path:polygon(100% 0,100% 100%,0 100%)}}
 .footLeft,.footCenter,.footRight{{position:relative;z-index:2}}
 .footCenter{{text-align:center;flex:1}}
 .tempoLegal{{font-family:"Arial Nova Cond Light","Arial Narrow",Arial,sans-serif;font-size:10px;line-height:1.3;color:#6b7280;font-weight:600}}
