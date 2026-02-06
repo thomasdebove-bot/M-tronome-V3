@@ -834,6 +834,11 @@ QUALITY_MODAL_CSS = r"""
 .qualityHighlight{background:#fee2e2; padding:0 4px; border-radius:4px; font-weight:900; color:#b91c1c}
 .qualityTips{border-left:4px solid #b91c1c; padding:10px 12px; background:#fff1f2; border-radius:10px; margin-top:12px}
 .qualityItemTitle{color:#b91c1c; font-weight:900}
+.qualityText{margin-top:6px; font-size:13px; line-height:1.5}
+.spellIssue{position:relative; border-bottom:2px solid #dc2626; color:#b91c1c; font-weight:700; cursor:help}
+.spellIssue::after{content:attr(data-tooltip); position:absolute; left:0; bottom:120%; background:#111827; color:#fff; padding:6px 8px; border-radius:8px; font-size:12px; line-height:1.3; white-space:normal; width:max-content; max-width:280px; box-shadow:0 8px 20px rgba(0,0,0,.2); opacity:0; pointer-events:none; transform:translateY(4px); transition:opacity .15s ease, transform .15s ease}
+.spellIssue::before{content:""; position:absolute; left:10px; bottom:112%; border:6px solid transparent; border-top-color:#111827; opacity:0; transition:opacity .15s ease}
+.spellIssue:hover::after,.spellIssue:hover::before{opacity:1; transform:translateY(0)}
 """
 
 QUALITY_MODAL_HTML = r"""
@@ -855,6 +860,49 @@ QUALITY_MODAL_JS = r"""
   const listEl = document.getElementById('qualityModalList');
   if(!modal || !listEl) return;
 
+  function escapeHtml(str){
+    return String(str || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  function escapeHtmlWithBreaks(str){
+    return escapeHtml(str).replace(/\n/g, "<br/>");
+  }
+
+  function tooltipText(issue){
+    const parts = [];
+    if(issue.message){ parts.push(issue.message); }
+    if(issue.replacements){ parts.push(`Suggestions: ${issue.replacements}`); }
+    if(issue.category){ parts.push(`Catégorie: ${issue.category}`); }
+    return parts.join(" • ") || "Suggestion";
+  }
+
+  function renderTextWithIssues(text, issues){
+    const safeText = String(text || "");
+    if(!issues || !issues.length){
+      return escapeHtmlWithBreaks(safeText);
+    }
+    const sorted = issues.slice().sort((a,b) => (a.offset ?? 0) - (b.offset ?? 0));
+    let html = "";
+    let cursor = 0;
+    sorted.forEach(issue => {
+      const start = Math.max(0, issue.offset ?? 0);
+      const length = Math.max(0, issue.length ?? 0);
+      if(length <= 0 || start < cursor){ return; }
+      html += escapeHtmlWithBreaks(safeText.slice(cursor, start));
+      const frag = safeText.slice(start, start + length);
+      const tip = tooltipText(issue);
+      html += `<span class="spellIssue" data-tooltip="${escapeHtml(tip)}">${escapeHtmlWithBreaks(frag)}</span>`;
+      cursor = start + length;
+    });
+    html += escapeHtmlWithBreaks(safeText.slice(cursor));
+    return html;
+  }
+
   function open(){
     listEl.innerHTML = "<div class='muted'>Analyse en cours…</div>";
     modal.style.display = "flex";
@@ -870,8 +918,7 @@ QUALITY_MODAL_JS = r"""
         }
         const score = data.score ?? 0;
         const total = data.total ?? 0;
-        const issuesByArea = data.issues_by_area || {};
-        const issueAreas = Object.keys(issuesByArea);
+        const items = data.items || [];
         const strengths = [
           score >= 95 ? "Très bonne qualité générale." : "Qualité perfectible, corrections recommandées.",
           total === 0 ? "Aucune faute détectée." : "Des corrections sont nécessaires.",
@@ -894,30 +941,24 @@ QUALITY_MODAL_JS = r"""
             <div class="meta" style="margin-top:6px">Corrige les libellés directement dans METRONOME pour améliorer la qualité globale.</div>
           </div>
         `;
-        if(!issueAreas.length){
+        if(!items.length){
           listEl.innerHTML = summary + "<div class='muted' style='margin-top:10px'>Aucune faute détectée.</div>";
           return;
         }
-        const sections = issueAreas.map(area => {
-          const items = (issuesByArea[area] || []).map(it => {
-            const ctx = it.context || "";
-            const highlight = it.context_offset != null && it.context_length != null
-              ? ctx.slice(0, it.context_offset) + "<span class='qualityHighlight'>" + ctx.slice(it.context_offset, it.context_offset + it.context_length) + "</span>" + ctx.slice(it.context_offset + it.context_length)
-              : ctx;
-            return `
-              <div class="item">
-                <div class="qualityItemTitle">${it.category || "Suggestion"} — ${it.message || ""}</div>
-                <div class="meta" style="margin-top:6px">Contexte: ${highlight || "—"}</div>
-                ${it.replacements ? `<div class="meta" style="margin-top:6px">Propositions: ${it.replacements}</div>` : ""}
-              </div>
-            `;
-          }).join("");
+        const sections = items.map(item => {
+          const label = item.title || "Mémo / tâche";
+          const area = item.area || "Général";
+          const count = item.count ?? (item.issues ? item.issues.length : 0);
+          const textHtml = renderTextWithIssues(item.text, item.issues || []);
           return `
-            <div style="margin-top:16px;font-weight:900">Zone : ${area}</div>
-            ${items}
+            <div class="item">
+              <div class="qualityItemTitle">${escapeHtml(label)} <span class="muted">— ${escapeHtml(area)}</span></div>
+              <div class="meta" style="margin-top:6px">Fautes détectées : ${count}</div>
+              <div class="qualityText">${textHtml}</div>
+            </div>
           `;
         }).join("");
-        listEl.innerHTML = summary + "<div style='margin-top:12px;font-weight:900'>Points à corriger</div>" + sections;
+        listEl.innerHTML = summary + "<div style='margin-top:12px;font-weight:900'>Fautes par mémo / tâche</div>" + sections;
       })
       .catch(() => {
         listEl.innerHTML = "<div class='muted'>Impossible d'analyser pour le moment.</div>";
@@ -1139,9 +1180,7 @@ LAYOUT_CONTROLS_JS = r"""
       }
     }
   }
-  document.addEventListener('click', (e) => {
-    const btn = e.target.closest('.zoneBtn');
-    if(!btn) return;
+  function handle(btn){
     const action = btn.dataset.action || '';
     const zone = closestZone(btn);
     if(!zone) return;
@@ -1152,6 +1191,12 @@ LAYOUT_CONTROLS_JS = r"""
     }else if(action === 'move-down'){
       move(zone, 'down');
     }
+  }
+  document.querySelectorAll('.zoneBtn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      handle(btn);
+    });
   });
 })();
 """
@@ -1898,7 +1943,7 @@ body{{padding:14px 14px 14px 280px;}}
 .wrap{{display:flex;flex-direction:column;gap:12px;align-items:center;}}
 .page{{width:210mm;min-height:297mm;position:relative;background:#fff;overflow:visible;break-after:page;page-break-after:always;}}
 .page:last-child{{break-after:auto;page-break-after:auto;}}
-.pageContent{{padding:10mm 8mm 34mm 8mm;}}
+.pageContent{{padding:10mm 8mm 16mm 8mm;}}
 .page--cover .pageContent{{padding-top:0;}}
 .muted{{color:var(--muted)}}
 .small{{font-size:12px}}
@@ -2051,7 +2096,7 @@ body{{padding:14px 14px 14px 280px;}}
 
 .sessionSubRow td{{background:#ffffff;}}
 .sessionSubRow td.colType{{color:#94a3b8;font-weight:700;}}
-.sessionSubRow td.colComment{{font-size:12px;color:#111827;font-weight:900;text-decoration:none;}}
+.sessionSubRow td.colComment{{font-size:12px;color:#111827;font-weight:400;text-decoration:none;}}
 .sessionSubRowCurrent td.colComment{{color:#1d4ed8;text-decoration:underline;text-underline-offset:2px;}}
 .colType{{text-align:center;font-weight:1000;white-space:nowrap;position:relative}}
 .colComment{{white-space:normal;position:relative}}
@@ -2076,7 +2121,7 @@ body{{padding:14px 14px 14px 280px;}}
 .entryComment{{margin-top:8px;padding-left:12px;border-left:3px solid #e2e8f0}}
 .tagReminderGreen{{color:#16a34a;font-weight:900}}
 .thumbA{{display:inline-flex}}
-.commentText{{font-weight:700;line-height:1.25}}
+.commentText{{font-weight:400;line-height:1.25}}
 .tagReminder{{color:#b91c1c;font-weight:900}}
 .annexTable{{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed;border:1px solid var(--border)}}
 .annexTable thead{{display:table-header-group}}
@@ -2097,16 +2142,16 @@ body{{padding:14px 14px 14px 280px;}}
 .reportHeader .accent{{color:#f59e0b;font-weight:900}}
 .presenceTable .presenceList{{margin:0;padding-left:0;list-style:none;display:flex;flex-direction:column;gap:6px}}
 .presenceTable .presenceLine{{display:flex;align-items:center;gap:8px;font-weight:700}}
-.docFooter{{position:absolute;left:0;right:0;bottom:0;height:24mm;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:3mm 10mm;border-top:1px solid #dbe5f0;background:#fff;overflow:hidden;width:100%;box-sizing:border-box}}
-.docFooter::before{{content:"";position:absolute;left:0;bottom:0;width:170px;height:42px;background:#123f45;clip-path:polygon(0 100%,100% 100%,0 0)}}
-.docFooter::after{{content:"";position:absolute;right:0;bottom:0;width:260px;height:70px;background:#123f45;clip-path:polygon(100% 0,100% 100%,0 100%)}}
+.docFooter{{position:absolute;left:0;right:0;bottom:0;height:12mm;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:2mm 6mm;border-top:1px solid #dbe5f0;background:#fff;overflow:hidden;width:100%;box-sizing:border-box}}
+.docFooter::before{{content:"";position:absolute;left:0;bottom:0;width:110px;height:26px;background:#123f45;clip-path:polygon(0 100%,100% 100%,0 0)}}
+.docFooter::after{{content:"";position:absolute;right:0;bottom:0;width:160px;height:36px;background:#123f45;clip-path:polygon(100% 0,100% 100%,0 100%)}}
 .footLeft,.footCenter,.footRight{{position:relative;z-index:2}}
 .footCenter{{text-align:center;flex:1}}
 .tempoLegal{{font-family:"Arial Nova Cond Light","Arial Narrow",Arial,sans-serif;font-size:10px;line-height:1.3;color:#6b7280;font-weight:600}}
-.footImg{{display:block;max-height:32px;width:auto}}
-.footMark{{max-height:48px}}
-.footRythme{{max-height:28px;margin:6px auto 0 auto}}
-.footTempo{{max-height:28px;margin-left:auto}}
+.footImg{{display:block;max-height:20px;width:auto}}
+.footMark{{max-height:30px}}
+.footRythme{{max-height:18px;margin:4px auto 0 auto}}
+.footTempo{{max-height:18px;margin-left:auto}}
 @media print{{body{{padding:0}} .actions,.rangePanel{{display:none!important}} .page{{width:210mm;min-height:297mm;margin:0;box-shadow:none;break-after:page;page-break-after:always;}} .page:last-child{{break-after:auto;page-break-after:auto;}}}}
 
 {EDITOR_MEMO_MODAL_CSS}
@@ -2258,9 +2303,6 @@ body{{padding:14px 14px 14px 280px;}}
           {zones_html}
           {annexes_html}
           <div style="height:18px"></div>
-          <div class="muted" style="font-weight:800">
-            TEMPO • Document généré automatiquement — vérifier les échéances critiques avant diffusion.
-          </div>
         </div>
       </div>
       <div class="docFooter">
@@ -2398,15 +2440,13 @@ def _quality_payload(text: str, language: str = "fr") -> Dict[str, object]:
     score = max(0, int(100 - (errors / words) * 100))
     issues = []
     for m in matches:
-        context = m.get("context", {}) or {}
         repl = ", ".join([r.get("value", "") for r in m.get("replacements", []) if r.get("value")])
         category = (m.get("rule", {}) or {}).get("category", {}) or {}
         issues.append(
             {
                 "message": m.get("message", ""),
-                "context": context.get("text", ""),
-                "context_offset": context.get("offset"),
-                "context_length": context.get("length"),
+                "offset": m.get("offset"),
+                "length": m.get("length"),
                 "replacements": repl,
                 "category": category.get("name", ""),
             }
@@ -2427,22 +2467,38 @@ def api_quality(
         rem_df = reminders_for_project(project_title=project, ref_date=ref_date, max_level=8)
         fol_df = followups_for_project(project_title=project, ref_date=ref_date, exclude_entry_ids=set())
 
+        def _clean_text(value: object) -> str:
+            if value is None:
+                return ""
+            if isinstance(value, float) and pd.isna(value):
+                return ""
+            text = str(value).strip()
+            if text.lower() == "nan":
+                return ""
+            return text
+
         def _items(df: pd.DataFrame) -> List[Dict[str, str]]:
             if df.empty:
                 return []
             df = _explode_areas(df.copy())
             out = []
             for _, r in df.iterrows():
-                title = str(r.get(E_COL_TITLE, "") or "").strip()
-                comment = str(r.get(E_COL_TASK_COMMENT_TEXT, "") or "").strip()
-                text = " ".join([t for t in [title, comment] if t]).strip()
+                title = _clean_text(r.get(E_COL_TITLE, ""))
+                comment = _clean_text(r.get(E_COL_TASK_COMMENT_TEXT, ""))
+                text = "\n".join([t for t in [title, comment] if t]).strip()
                 if not text:
                     continue
-                out.append({"area": str(r.get("__area_list__", "Général")), "text": text})
+                out.append(
+                    {
+                        "area": str(r.get("__area_list__", "Général")),
+                        "text": text,
+                        "title": title,
+                    }
+                )
             return out
 
         items = _items(edf) + _items(rem_df) + _items(fol_df)
-        issues_by_area: Dict[str, List[Dict[str, object]]] = {}
+        items_with_issues: List[Dict[str, object]] = []
         total_errors = 0
         total_words = 0
         for it in items:
@@ -2450,9 +2506,17 @@ def api_quality(
             total_errors += int(payload.get("total", 0))
             total_words += max(1, len(re.findall(r"\w+", it["text"])))
             if payload.get("issues"):
-                issues_by_area.setdefault(it["area"], []).extend(payload["issues"])
+                items_with_issues.append(
+                    {
+                        "area": it["area"],
+                        "title": it.get("title") or "Mémo / tâche",
+                        "text": it["text"],
+                        "issues": payload["issues"],
+                        "count": len(payload["issues"]),
+                    }
+                )
         score = max(0, int(100 - (total_errors / max(1, total_words)) * 100))
-        return {"score": score, "total": total_errors, "issues_by_area": issues_by_area}
+        return {"score": score, "total": total_errors, "items": items_with_issues}
     except MissingDataError as err:
         return JSONResponse(
             {"error": str(err), "label": err.label, "path": err.path, "env_var": err.env_var},
