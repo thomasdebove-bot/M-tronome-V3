@@ -1138,6 +1138,7 @@ LAYOUT_CONTROLS_JS = r"""
         zone.parentNode.insertBefore(next, zone);
       }
     }
+    if(window.repaginateReport){ window.repaginateReport(); }
   }
   document.addEventListener('click', (e) => {
     const btn = e.target.closest('.zoneBtn');
@@ -1152,6 +1153,78 @@ LAYOUT_CONTROLS_JS = r"""
     }else if(action === 'move-down'){
       move(zone, 'down');
     }
+  });
+})();
+"""
+
+PAGINATION_JS = r"""
+(function(){
+  function px(value){
+    const n = parseFloat(value || "0");
+    return Number.isNaN(n) ? 0 : n;
+  }
+
+  function calcAvailable(page, includePresence){
+    const pageContent = page.querySelector('.pageContent');
+    const footer = page.querySelector('.docFooter');
+    const header = page.querySelector('.reportHeader');
+    const presence = page.querySelector('.presenceWrap');
+    const pageRect = page.getBoundingClientRect();
+    if(!pageContent) return pageRect.height;
+    const styles = window.getComputedStyle(pageContent);
+    let available = pageRect.height - px(styles.paddingTop) - px(styles.paddingBottom);
+    if(footer){ available -= footer.getBoundingClientRect().height; }
+    if(header){ available -= header.getBoundingClientRect().height; }
+    if(includePresence && presence){ available -= presence.getBoundingClientRect().height; }
+    return available;
+  }
+
+  function clearExtraPages(container){
+    const pages = Array.from(container.querySelectorAll('.page--report'));
+    pages.slice(1).forEach(page => page.remove());
+  }
+
+  function paginate(){
+    const container = document.querySelector('.reportPages');
+    const firstPage = container?.querySelector('.page--report');
+    if(!container || !firstPage) return;
+    const blocksContainer = firstPage.querySelector('.reportBlocks');
+    if(!blocksContainer) return;
+    const blocks = Array.from(container.querySelectorAll('.reportBlock')).map(block => ({
+      node: block,
+      height: block.getBoundingClientRect().height || block.offsetHeight || 0,
+    }));
+
+    blocks.forEach(({node}) => node.remove());
+    clearExtraPages(container);
+
+    let currentPage = firstPage;
+    let currentBlocks = blocksContainer;
+    let available = calcAvailable(currentPage, true);
+    let used = 0;
+    const template = document.getElementById('report-page-template');
+
+    blocks.forEach(({node, height}) => {
+      if(used > 0 && used + height > available && template){
+        const clone = template.content.firstElementChild.cloneNode(true);
+        container.appendChild(clone);
+        currentPage = clone;
+        currentBlocks = clone.querySelector('.reportBlocks');
+        available = calcAvailable(currentPage, false);
+        used = 0;
+      }
+      currentBlocks.appendChild(node);
+      used += height;
+    });
+  }
+
+  window.repaginateReport = paginate;
+  window.addEventListener('load', () => {
+    requestAnimationFrame(paginate);
+  });
+  window.addEventListener('resize', () => {
+    clearTimeout(window.__repaginateTimer);
+    window.__repaginateTimer = setTimeout(paginate, 200);
   });
 })();
 """
@@ -1214,6 +1287,7 @@ ROW_CONTROL_JS = r"""
     refreshHiddenSelect();
     syncSessionHeaders();
     syncZoneVisibility();
+    if(window.repaginateReport){ window.repaginateReport(); }
   }
 
   document.addEventListener('change', (e) => {
@@ -1234,6 +1308,7 @@ ROW_CONTROL_JS = r"""
     Array.from(hiddenSet).forEach(id => setRowVisibility(id, true));
     syncSessionHeaders();
     syncZoneVisibility();
+    if(window.repaginateReport){ window.repaginateReport(); }
   };
 
   syncSessionHeaders();
@@ -1548,15 +1623,17 @@ def render_cr(
         return f"<tr><td>{_escape(label)} ({len(items)})</td><td><ul class='presenceList'>{''.join(rows)}</ul></td></tr>"
 
     presence_html = f"""
-      <table class="annexTable coverTable presenceTable">
-        <thead>
-          <tr><th>Type</th><th>Entreprises</th></tr>
-        </thead>
-        <tbody>
-          {render_presence_rows(att, "Présentes")}
-          {render_presence_rows(miss, "Absentes / Excusées")}
-        </tbody>
-      </table>
+      <div class="presenceWrap">
+        <table class="annexTable coverTable presenceTable">
+          <thead>
+            <tr><th>Type</th><th>Entreprises</th></tr>
+          </thead>
+          <tbody>
+            {render_presence_rows(att, "Présentes")}
+            {render_presence_rows(miss, "Absentes / Excusées")}
+          </tbody>
+        </table>
+      </div>
     """
 
     actions_html = f"""
@@ -1730,7 +1807,7 @@ def render_cr(
             return ""
         zt = _escape(area_name)
         return f"""
-        <div class="zoneBlock">
+        <div class="zoneBlock reportBlock">
           <div class="zoneTitle">
             <span>{zt}</span>
             <div class="zoneTools noPrint">
@@ -1867,6 +1944,13 @@ def render_cr(
             zones_html_parts.append(zone_table_html)
 
     zones_html = "".join(zones_html_parts)
+    report_note_html = """
+      <div class="reportBlock reportNote">
+        <div class="muted" style="font-weight:800">
+          TEMPO • Document généré automatiquement — vérifier les échéances critiques avant diffusion.
+        </div>
+      </div>
+    """
 
     # -------------------------
     # CSS
@@ -1896,7 +1980,7 @@ def render_cr(
 html,body{{margin:0;padding:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Arial;-webkit-print-color-adjust:exact;print-color-adjust:exact;}}
 body{{padding:14px 14px 14px 280px;}}
 .wrap{{display:flex;flex-direction:column;gap:12px;align-items:center;}}
-.page{{width:210mm;min-height:297mm;position:relative;background:#fff;overflow:visible;break-after:page;page-break-after:always;}}
+.page{{width:210mm;height:297mm;min-height:297mm;position:relative;background:#fff;overflow:visible;break-after:page;page-break-after:always;}}
 .page:last-child{{break-after:auto;page-break-after:auto;}}
 .pageContent{{padding:10mm 8mm 34mm 8mm;}}
 .page--cover .pageContent{{padding-top:0;}}
@@ -2039,6 +2123,9 @@ body{{padding:14px 14px 14px 280px;}}
 
 .zoneBlock{{margin:0}}
 .zoneBlock + .zoneBlock{{margin-top:0}}
+.reportBlocks{{display:flex;flex-direction:column;gap:0}}
+.reportBlock{{break-inside:avoid;page-break-inside:avoid}}
+.reportNote{{margin-top:12px}}
 .crTable{{width:100%;border-collapse:collapse;table-layout:fixed;border:1px solid var(--border);margin-top:-1px;}}
 .crTable thead{{display:table-header-group}}
 .crTable tfoot{{display:table-footer-group}}
@@ -2207,7 +2294,7 @@ body{{padding:14px 14px 14px 280px;}}
                     )
             if items:
                 annexes_html = f"""
-      <div class="section">
+      <div class="section reportBlock">
         <table class="annexTable">
           <thead>
             <tr>
@@ -2250,17 +2337,34 @@ body{{padding:14px 14px 14px 280px;}}
       </div>
     </section>
 
+    <div class="reportPages">
+      <section class="page page--report">
+        <div class="pageContent">
+          <div class="reportTables">
+            {report_header_html}
+            {presence_html}
+            <div class="reportBlocks">
+              {zones_html}
+              {annexes_html}
+              {report_note_html}
+            </div>
+          </div>
+        </div>
+        <div class="docFooter">
+          <div class="footLeft">{"<img class='footImg footMark' src='" + logo_tmark + "' alt='' />" if logo_tmark else ""}</div>
+          <div class="footCenter"><div style="font-family:'Arial Nova Cond Light','Arial Narrow',Arial,sans-serif;font-size:12px;font-weight:700;color:#111">TEMPO</div><div class="tempoLegal">104/106 rue Oberkampf (Cité du figuier) — 75011 Paris<br/>SAS au capital de 1 000 Euros - RCS Créteil N° 892 046 301 - APE 7112 B</div>{("<img class='footImg footRythme' src='" + logo_rythme + "' alt='' />") if logo_rythme else ""}</div>
+          <div class="footRight"></div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <template id="report-page-template">
     <section class="page page--report">
       <div class="pageContent">
         <div class="reportTables">
           {report_header_html}
-          {presence_html}
-          {zones_html}
-          {annexes_html}
-          <div style="height:18px"></div>
-          <div class="muted" style="font-weight:800">
-            TEMPO • Document généré automatiquement — vérifier les échéances critiques avant diffusion.
-          </div>
+          <div class="reportBlocks"></div>
         </div>
       </div>
       <div class="docFooter">
@@ -2269,7 +2373,7 @@ body{{padding:14px 14px 14px 280px;}}
         <div class="footRight"></div>
       </div>
     </section>
-  </div>
+  </template>
 
 {EDITOR_MEMO_MODAL_HTML}
 {QUALITY_MODAL_HTML}
@@ -2279,6 +2383,7 @@ body{{padding:14px 14px 14px 280px;}}
 <script>{ANALYSIS_MODAL_JS}</script>
 <script>{RANGE_PICKER_JS}</script>
 <script>{LAYOUT_CONTROLS_JS}</script>
+<script>{PAGINATION_JS}</script>
 <script>{ROW_CONTROL_JS}</script>
 <script>{RESIZE_COLUMNS_JS}</script>
 <script>{RESIZE_TOP_JS}</script>
