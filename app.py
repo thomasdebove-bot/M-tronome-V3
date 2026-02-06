@@ -464,7 +464,7 @@ def render_task_comment(r) -> str:
       <div class="topicComment">
         <div class="metaLabel">Commentaire</div>
         <div class="metaVal">{meta or "—"}</div>
-        <div class="editableBlock indentable" contenteditable="true" style="margin-top:6px">{body}</div>
+        <div style="margin-top:6px">{body}</div>
       </div>
     """
 
@@ -483,7 +483,7 @@ def render_entry_comment(r) -> str:
     return f"""
       <div class="entryComment">
         <div class="metaVal">{meta or "—"}</div>
-        <div class="editableBlock indentable" contenteditable="true" style="margin-top:6px">{body}</div>
+        <div style="margin-top:6px">{body}</div>
       </div>
     """
 
@@ -1138,22 +1138,7 @@ LAYOUT_CONTROLS_JS = r"""
         zone.parentNode.insertBefore(next, zone);
       }
     }
-  }
-  function adjustSpace(zone, delta){
-    if(!zone) return;
-    const spacer = zone.querySelector('.zoneSpacer');
-    if(!spacer) return;
-    const current = parseFloat(spacer.dataset.space || '0');
-    const next = Math.max(0, current + delta);
-    spacer.dataset.space = String(next);
-    spacer.style.height = `${next}mm`;
-  }
-  function resetSpace(zone){
-    if(!zone) return;
-    const spacer = zone.querySelector('.zoneSpacer');
-    if(!spacer) return;
-    spacer.dataset.space = '0';
-    spacer.style.height = '0mm';
+    if(window.repaginateReport){ window.repaginateReport(); }
   }
   document.addEventListener('click', (e) => {
     const btn = e.target.closest('.zoneBtn');
@@ -1163,14 +1148,6 @@ LAYOUT_CONTROLS_JS = r"""
     if(!zone) return;
     if(action === 'highlight'){
       zone.classList.toggle('highlight');
-    }else if(action === 'page-break'){
-      zone.classList.toggle('pageBreakBefore');
-    }else if(action === 'space-up'){
-      adjustSpace(zone, 5);
-    }else if(action === 'space-down'){
-      adjustSpace(zone, -5);
-    }else if(action === 'space-reset'){
-      resetSpace(zone);
     }else if(action === 'move-up'){
       move(zone, 'up');
     }else if(action === 'move-down'){
@@ -1180,93 +1157,75 @@ LAYOUT_CONTROLS_JS = r"""
 })();
 """
 
-PAGE_SETUP_JS = r"""
+PAGINATION_JS = r"""
 (function(){
-  const root = document.documentElement;
-  const fields = [
-    { id: 'marginTop', cssVar: '--page-margin-top', unit: 'mm' },
-    { id: 'marginRight', cssVar: '--page-margin-right', unit: 'mm' },
-    { id: 'marginBottom', cssVar: '--page-margin-bottom', unit: 'mm' },
-    { id: 'marginLeft', cssVar: '--page-margin-left', unit: 'mm' },
-    { id: 'bleed', cssVar: '--page-bleed', unit: 'mm' },
-    { id: 'baseFont', cssVar: '--base-font-size', unit: 'px' },
-  ];
-
-  function readVar(name){
-    return getComputedStyle(root).getPropertyValue(name).trim();
+  function px(value){
+    const n = parseFloat(value || "0");
+    return Number.isNaN(n) ? 0 : n;
   }
 
-  function setVar(name, value, unit){
-    if(value === '' || value === null || value === undefined){ return; }
-    const normalized = `${value}${unit}`;
-    root.style.setProperty(name, normalized);
+  function calcAvailable(page, includePresence){
+    const pageContent = page.querySelector('.pageContent');
+    const footer = page.querySelector('.docFooter');
+    const header = page.querySelector('.reportHeader');
+    const presence = page.querySelector('.presenceWrap');
+    const pageRect = page.getBoundingClientRect();
+    if(!pageContent) return pageRect.height;
+    const styles = window.getComputedStyle(pageContent);
+    let available = pageRect.height - px(styles.paddingTop) - px(styles.paddingBottom);
+    if(footer){ available -= footer.getBoundingClientRect().height; }
+    if(header){ available -= header.getBoundingClientRect().height; }
+    if(includePresence && presence){ available -= presence.getBoundingClientRect().height; }
+    return available;
   }
 
-  function syncInputs(){
-    fields.forEach(({ id, cssVar, unit }) => {
-      const el = document.getElementById(id);
-      if(!el) return;
-      const current = readVar(cssVar).replace(unit, '').trim();
-      if(current){ el.value = current; }
+  function clearExtraPages(container){
+    const pages = Array.from(container.querySelectorAll('.page--report'));
+    pages.slice(1).forEach(page => page.remove());
+  }
+
+  function paginate(){
+    const container = document.querySelector('.reportPages');
+    const firstPage = container?.querySelector('.page--report');
+    if(!container || !firstPage) return;
+    const blocksContainer = firstPage.querySelector('.reportBlocks');
+    if(!blocksContainer) return;
+    const blocks = Array.from(container.querySelectorAll('.reportBlock')).map(block => ({
+      node: block,
+      height: block.getBoundingClientRect().height || block.offsetHeight || 0,
+    }));
+
+    blocks.forEach(({node}) => node.remove());
+    clearExtraPages(container);
+
+    let currentPage = firstPage;
+    let currentBlocks = blocksContainer;
+    let available = calcAvailable(currentPage, true);
+    let used = 0;
+    const template = document.getElementById('report-page-template');
+
+    blocks.forEach(({node, height}) => {
+      if(used > 0 && used + height > available && template){
+        const clone = template.content.firstElementChild.cloneNode(true);
+        container.appendChild(clone);
+        currentPage = clone;
+        currentBlocks = clone.querySelector('.reportBlocks');
+        available = calcAvailable(currentPage, false);
+        used = 0;
+      }
+      currentBlocks.appendChild(node);
+      used += height;
     });
   }
 
-  function applyDefaults(){
-    fields.forEach(({ id, cssVar, unit }) => {
-      const el = document.getElementById(id);
-      if(!el) return;
-      const def = el.dataset.default;
-      if(def){ setVar(cssVar, def, unit); }
-    });
-    syncInputs();
-  }
-
-  document.addEventListener('input', (e) => {
-    const target = e.target;
-    if(!(target instanceof HTMLInputElement)) return;
-    const field = fields.find((f) => f.id === target.id);
-    if(!field) return;
-    setVar(field.cssVar, target.value, field.unit);
+  window.repaginateReport = paginate;
+  window.addEventListener('load', () => {
+    requestAnimationFrame(paginate);
   });
-
-  const btnReset = document.getElementById('btnResetLayout');
-  if(btnReset){
-    btnReset.addEventListener('click', applyDefaults);
-  }
-
-  const btnGuides = document.getElementById('btnToggleGuides');
-  if(btnGuides){
-    btnGuides.addEventListener('click', () => {
-      document.body.classList.toggle('show-guides');
-    });
-  }
-
-  function findIndentTarget(){
-    const sel = window.getSelection();
-    if(!sel || !sel.anchorNode){ return null; }
-    const el = sel.anchorNode.nodeType === Node.ELEMENT_NODE ? sel.anchorNode : sel.anchorNode.parentElement;
-    if(!el) return null;
-    return el.closest('.indentable, .editableBlock, .editableCell');
-  }
-
-  function adjustIndent(delta){
-    const target = findIndentTarget();
-    if(!target) return;
-    const current = parseInt(target.dataset.indent || '0', 10);
-    const next = Math.max(0, Math.min(3, current + delta));
-    target.dataset.indent = String(next);
-  }
-
-  const btnIndent = document.getElementById('btnIndent');
-  const btnOutdent = document.getElementById('btnOutdent');
-  if(btnIndent){
-    btnIndent.addEventListener('click', () => adjustIndent(1));
-  }
-  if(btnOutdent){
-    btnOutdent.addEventListener('click', () => adjustIndent(-1));
-  }
-
-  syncInputs();
+  window.addEventListener('resize', () => {
+    clearTimeout(window.__repaginateTimer);
+    window.__repaginateTimer = setTimeout(paginate, 200);
+  });
 })();
 """
 
@@ -1328,6 +1287,7 @@ ROW_CONTROL_JS = r"""
     refreshHiddenSelect();
     syncSessionHeaders();
     syncZoneVisibility();
+    if(window.repaginateReport){ window.repaginateReport(); }
   }
 
   document.addEventListener('change', (e) => {
@@ -1348,6 +1308,7 @@ ROW_CONTROL_JS = r"""
     Array.from(hiddenSet).forEach(id => setRowVisibility(id, true));
     syncSessionHeaders();
     syncZoneVisibility();
+    if(window.repaginateReport){ window.repaginateReport(); }
   };
 
   syncSessionHeaders();
@@ -1662,15 +1623,17 @@ def render_cr(
         return f"<tr><td>{_escape(label)} ({len(items)})</td><td><ul class='presenceList'>{''.join(rows)}</ul></td></tr>"
 
     presence_html = f"""
-      <table class="annexTable coverTable presenceTable">
-        <thead>
-          <tr><th>Type</th><th>Entreprises</th></tr>
-        </thead>
-        <tbody>
-          {render_presence_rows(att, "Présentes")}
-          {render_presence_rows(miss, "Absentes / Excusées")}
-        </tbody>
-      </table>
+      <div class="presenceWrap">
+        <table class="annexTable coverTable presenceTable">
+          <thead>
+            <tr><th>Type</th><th>Entreprises</th></tr>
+          </thead>
+          <tbody>
+            {render_presence_rows(att, "Présentes")}
+            {render_presence_rows(miss, "Absentes / Excusées")}
+          </tbody>
+        </table>
+      </div>
     """
 
     actions_html = f"""
@@ -1685,32 +1648,6 @@ def render_cr(
         <button class="btn secondary editCompact" type="button" onclick="restoreSelectedRow()">Réafficher la ligne</button>
         <button class="btn secondary editCompact" type="button" onclick="restoreAllHiddenRows()">Réafficher tout</button>
         <a class="btn secondary" href="/">Changer de réunion</a>
-        <div class="layoutPanel">
-          <div class="panelTitle">Mise en page A4</div>
-          <div class="panelGroup">
-            <div class="panelLabel">Marges (mm)</div>
-            <div class="layoutGrid">
-              <label>Haut<input id="marginTop" type="number" min="0" step="0.5" data-default="10" /></label>
-              <label>Droite<input id="marginRight" type="number" min="0" step="0.5" data-default="8" /></label>
-              <label>Bas<input id="marginBottom" type="number" min="0" step="0.5" data-default="34" /></label>
-              <label>Gauche<input id="marginLeft" type="number" min="0" step="0.5" data-default="8" /></label>
-            </div>
-          </div>
-          <div class="panelGroup">
-            <div class="panelLabel">Empiètement (mm)</div>
-            <label><input id="bleed" type="number" min="0" step="0.5" data-default="0" /></label>
-          </div>
-          <div class="panelGroup">
-            <div class="panelLabel">Taille du texte (px)</div>
-            <label><input id="baseFont" type="number" min="10" max="22" step="1" data-default="14" /></label>
-          </div>
-          <div class="panelActions">
-            <button class="btn secondary" id="btnToggleGuides" type="button">Repères de marge</button>
-            <button class="btn secondary" id="btnIndent" type="button">Augmenter retrait</button>
-            <button class="btn secondary" id="btnOutdent" type="button">Diminuer retrait</button>
-            <button class="btn secondary" id="btnResetLayout" type="button">Réinitialiser</button>
-          </div>
-        </div>
       </div>
       <div class="rangePanel noPrint" id="rangePanel" style="display:{'flex' if range_active else 'none'}">
         <div class="rangeFields">
@@ -1834,7 +1771,7 @@ def render_cr(
           <tr class="{row_cls}" data-row-id="{safe_row_id}">
             <td class="colType">{toggle_html}<div>{tag_html or "—"}</div></td>
             <td class="colComment">
-              <div class="commentText editableBlock indentable" contenteditable="true">{title}</div>
+              <div class="commentText">{title}</div>
               {thumbs}
               {render_entry_comment(r)}
             </td>
@@ -1870,17 +1807,13 @@ def render_cr(
             return ""
         zt = _escape(area_name)
         return f"""
-        <div class="zoneBlock">
+        <div class="zoneBlock reportBlock">
           <div class="zoneTitle">
             <span>{zt}</span>
             <div class="zoneTools noPrint">
               <button class="zoneBtn" type="button" data-action="move-up">↑</button>
               <button class="zoneBtn" type="button" data-action="move-down">↓</button>
               <button class="zoneBtn" type="button" data-action="highlight">Surligner</button>
-              <button class="zoneBtn" type="button" data-action="page-break">Saut de page</button>
-              <button class="zoneBtn" type="button" data-action="space-up">Espace +</button>
-              <button class="zoneBtn" type="button" data-action="space-down">Espace -</button>
-              <button class="zoneBtn" type="button" data-action="space-reset">Espace 0</button>
                                                         <button class="btnAddMemo" type="button" data-area="{zt}">+ Ajouter mémo</button>
             </div>
           </div>
@@ -1909,7 +1842,6 @@ def render_cr(
               {rows_html}
             </tbody>
           </table>
-          <div class="zoneSpacer" data-space="0" style="height:0mm"></div>
         </div>
         """
 
@@ -2012,6 +1944,13 @@ def render_cr(
             zones_html_parts.append(zone_table_html)
 
     zones_html = "".join(zones_html_parts)
+    report_note_html = """
+      <div class="reportBlock reportNote">
+        <div class="muted" style="font-weight:800">
+          TEMPO • Document généré automatiquement — vérifier les échéances critiques avant diffusion.
+        </div>
+      </div>
+    """
 
     # -------------------------
     # CSS
@@ -2033,60 +1972,18 @@ def render_cr(
   --col-lot:8%;
   --col-who:8%;
   --a4-width:210mm;
-  --a4-height:297mm;
-  --page-margin-top:10mm;
-  --page-margin-right:8mm;
-  --page-margin-bottom:34mm;
-  --page-margin-left:8mm;
-  --page-bleed:0mm;
-  --base-font-size:14px;
-  --page-gap:12mm;
+  --a4-padding-x:6mm;
   --kpi-cols:4;
   --top-scale:1;
 }}
 *{{box-sizing:border-box}}
-html,body{{margin:0;padding:0;background:var(--bg);color:var(--text);font:var(--base-font-size)/1.45 system-ui,-apple-system,Segoe UI,Roboto,Arial;-webkit-print-color-adjust:exact;print-color-adjust:exact;}}
+html,body{{margin:0;padding:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Arial;-webkit-print-color-adjust:exact;print-color-adjust:exact;}}
 body{{padding:14px 14px 14px 280px;}}
 .wrap{{display:flex;flex-direction:column;gap:12px;align-items:center;}}
-.page{{width:var(--a4-width);min-height:var(--a4-height);position:relative;background:#fff;overflow:visible;break-after:page;page-break-after:always;}}
+.page{{width:210mm;height:297mm;min-height:297mm;position:relative;background:#fff;overflow:visible;break-after:page;page-break-after:always;}}
 .page:last-child{{break-after:auto;page-break-after:auto;}}
-.pageContent{{
-  position:relative;
-  padding:
-    calc(var(--page-margin-top) - var(--page-bleed))
-    calc(var(--page-margin-right) - var(--page-bleed))
-    calc(var(--page-margin-bottom) - var(--page-bleed))
-    calc(var(--page-margin-left) - var(--page-bleed));
-}}
-.show-guides .page::after{{
-  content:"";
-  position:absolute;
-  top:var(--page-margin-top);
-  right:var(--page-margin-right);
-  bottom:var(--page-margin-bottom);
-  left:var(--page-margin-left);
-  border:1px dashed #94a3b8;
-  pointer-events:none;
-}}
+.pageContent{{padding:10mm 8mm 34mm 8mm;}}
 .page--cover .pageContent{{padding-top:0;}}
-.pageStack{{width:100%;min-height:var(--a4-height);}}
-@media screen{{
-  .page--report{{background:#e5e7eb;}}
-  .page--report .pageContent{{background:transparent;}}
-  .pageStack{{
-    padding-bottom:var(--page-gap);
-    background-image:repeating-linear-gradient(
-      to bottom,
-      #ffffff 0,
-      #ffffff var(--a4-height),
-      #e5e7eb var(--a4-height),
-      #e5e7eb calc(var(--a4-height) + var(--page-gap))
-    );
-    background-size:100% calc(var(--a4-height) + var(--page-gap));
-    background-repeat:repeat-y;
-    box-shadow:0 0 0 1px #cbd5e1 inset;
-  }}
-}}
 .muted{{color:var(--muted)}}
 .small{{font-size:12px}}
 .noPrint{{}}
@@ -2164,14 +2061,6 @@ body{{padding:14px 14px 14px 280px;}}
 .zoneBtn{{border:1px solid #ffffff;background:#fff;border-radius:8px;padding:4px 8px;font-weight:800;cursor:pointer}}
 .zoneBlock.highlight{{box-shadow:0 0 0 2px #f59e0b inset; background:linear-gradient(180deg,#fff7ed,#fff)}}
 .zoneBlock.pageBreakBefore{{page-break-before:always}}
-.zoneBlock.pageBreakBefore .zoneTitle::after{{content:"Saut de page";margin-left:10px;color:#1d4ed8;font-weight:900;}}
-.zoneSpacer{{width:100%;height:0;}}
-@media screen{{
-  .zoneSpacer{{background:repeating-linear-gradient(90deg,#e2e8f0 0,#e2e8f0 6px,#f8fafc 6px,#f8fafc 12px);border:1px dashed #cbd5e1;border-radius:8px;margin-top:8px;}}
-}}
-@media print{{
-  .zoneSpacer{{background:none;border:none;margin-top:0}}
-}}
 .u-page-break{{break-before:page;page-break-before:always;}}
 .u-avoid-break{{break-inside:avoid;page-break-inside:avoid;}}
 
@@ -2209,19 +2098,6 @@ body{{padding:14px 14px 14px 280px;}}
 .actions .btn,.actions .hiddenRowsSelect{{width:100%}}
 .btn{{display:inline-flex;align-items:center;justify-content:center;gap:10px;padding:11px 14px;border-radius:12px;border:1px solid var(--border);background:var(--accent);color:#fff;font-weight:950;cursor:pointer;text-decoration:none}}
 .btn.secondary{{background:#fff;color:var(--text);font-weight:900}}
-.layoutPanel{{margin-top:8px;border-top:1px dashed var(--border);padding-top:8px;display:flex;flex-direction:column;gap:8px}}
-.panelTitle{{font-weight:1000;font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#1e293b}}
-.panelGroup{{display:flex;flex-direction:column;gap:6px}}
-.panelLabel{{font-weight:800;font-size:11px;color:#475569}}
-.layoutGrid{{display:grid;grid-template-columns:repeat(2,1fr);gap:6px}}
-.layoutGrid label,.panelGroup label{{display:flex;flex-direction:column;gap:4px;font-weight:700;font-size:11px}}
-.layoutGrid input,.panelGroup input{{padding:6px 8px;border-radius:10px;border:1px solid var(--border);font-weight:700}}
-.panelActions{{display:flex;flex-direction:column;gap:6px}}
-.editableBlock{{outline:none}}
-.editableBlock:focus{{box-shadow:0 0 0 2px rgba(59,130,246,.25);border-radius:6px}}
-.indentable[data-indent="1"]{{padding-left:6mm}}
-.indentable[data-indent="2"]{{padding-left:12mm}}
-.indentable[data-indent="3"]{{padding-left:18mm}}
 .rangePanel{{position:fixed;top:430px;left:14px;z-index:9998;width:248px;border:1px solid var(--border);border-radius:14px;padding:12px;background:#fff;display:flex;flex-direction:column;gap:10px;box-shadow:0 8px 24px rgba(2,6,23,.12)}}
 .rangeFields{{display:flex;gap:12px;flex-wrap:wrap}}
 .rangeField{{display:flex;flex-direction:column;gap:6px;min-width:180px}}
@@ -2247,6 +2123,9 @@ body{{padding:14px 14px 14px 280px;}}
 
 .zoneBlock{{margin:0}}
 .zoneBlock + .zoneBlock{{margin-top:0}}
+.reportBlocks{{display:flex;flex-direction:column;gap:0}}
+.reportBlock{{break-inside:avoid;page-break-inside:avoid}}
+.reportNote{{margin-top:12px}}
 .crTable{{width:100%;border-collapse:collapse;table-layout:fixed;border:1px solid var(--border);margin-top:-1px;}}
 .crTable thead{{display:table-header-group}}
 .crTable tfoot{{display:table-footer-group}}
@@ -2369,7 +2248,7 @@ body{{padding:14px 14px 14px 280px;}}
     """
 
     report_header_html = f"""
-      <div class='reportHeader printHeaderFixed editableBlock' contenteditable='true'>
+      <div class='reportHeader printHeaderFixed'>
         {_escape(project)} <span class='accent'>— Compte Rendu</span> n°<span contenteditable='true' class='editInline'>06</span> — Réunion de Synthèse du {_escape(cr_date_txt)}
       </div>
     """
@@ -2415,7 +2294,7 @@ body{{padding:14px 14px 14px 280px;}}
                     )
             if items:
                 annexes_html = f"""
-      <div class="section">
+      <div class="section reportBlock">
         <table class="annexTable">
           <thead>
             <tr>
@@ -2453,41 +2332,48 @@ body{{padding:14px 14px 14px 280px;}}
       </div>
       <div class="docFooter">
         <div class="footLeft">{"<img class='footImg footMark' src='" + logo_tmark + "' alt='' />" if logo_tmark else ""}</div>
-        <div class="footCenter">
-          <div class="footerText editableBlock indentable" contenteditable="true" style="font-family:'Arial Nova Cond Light','Arial Narrow',Arial,sans-serif;font-size:12px;font-weight:700;color:#111">TEMPO</div>
-          <div class="tempoLegal editableBlock indentable" contenteditable="true">104/106 rue Oberkampf (Cité du figuier) — 75011 Paris<br/>SAS au capital de 1 000 Euros - RCS Créteil N° 892 046 301 - APE 7112 B</div>
-          {("<img class='footImg footRythme' src='" + logo_rythme + "' alt='' />") if logo_rythme else ""}
-        </div>
+        <div class="footCenter"><div style="font-family:'Arial Nova Cond Light','Arial Narrow',Arial,sans-serif;font-size:12px;font-weight:700;color:#111">TEMPO</div><div class="tempoLegal">104/106 rue Oberkampf (Cité du figuier) — 75011 Paris<br/>SAS au capital de 1 000 Euros - RCS Créteil N° 892 046 301 - APE 7112 B</div>{("<img class='footImg footRythme' src='" + logo_rythme + "' alt='' />") if logo_rythme else ""}</div>
         <div class="footRight"></div>
       </div>
     </section>
 
-    <section class="page page--report">
-      <div class="pageContent">
-        <div class="pageStack">
-        <div class="reportTables">
-          {report_header_html}
-          {presence_html}
-          {zones_html}
-          {annexes_html}
-          <div style="height:18px"></div>
-          <div class="muted" style="font-weight:800">
-            TEMPO • Document généré automatiquement — vérifier les échéances critiques avant diffusion.
+    <div class="reportPages">
+      <section class="page page--report">
+        <div class="pageContent">
+          <div class="reportTables">
+            {report_header_html}
+            {presence_html}
+            <div class="reportBlocks">
+              {zones_html}
+              {annexes_html}
+              {report_note_html}
+            </div>
           </div>
         </div>
+        <div class="docFooter">
+          <div class="footLeft">{"<img class='footImg footMark' src='" + logo_tmark + "' alt='' />" if logo_tmark else ""}</div>
+          <div class="footCenter"><div style="font-family:'Arial Nova Cond Light','Arial Narrow',Arial,sans-serif;font-size:12px;font-weight:700;color:#111">TEMPO</div><div class="tempoLegal">104/106 rue Oberkampf (Cité du figuier) — 75011 Paris<br/>SAS au capital de 1 000 Euros - RCS Créteil N° 892 046 301 - APE 7112 B</div>{("<img class='footImg footRythme' src='" + logo_rythme + "' alt='' />") if logo_rythme else ""}</div>
+          <div class="footRight"></div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <template id="report-page-template">
+    <section class="page page--report">
+      <div class="pageContent">
+        <div class="reportTables">
+          {report_header_html}
+          <div class="reportBlocks"></div>
         </div>
       </div>
       <div class="docFooter">
         <div class="footLeft">{"<img class='footImg footMark' src='" + logo_tmark + "' alt='' />" if logo_tmark else ""}</div>
-        <div class="footCenter">
-          <div class="footerText editableBlock indentable" contenteditable="true" style="font-family:'Arial Nova Cond Light','Arial Narrow',Arial,sans-serif;font-size:12px;font-weight:700;color:#111">TEMPO</div>
-          <div class="tempoLegal editableBlock indentable" contenteditable="true">104/106 rue Oberkampf (Cité du figuier) — 75011 Paris<br/>SAS au capital de 1 000 Euros - RCS Créteil N° 892 046 301 - APE 7112 B</div>
-          {("<img class='footImg footRythme' src='" + logo_rythme + "' alt='' />") if logo_rythme else ""}
-        </div>
+        <div class="footCenter"><div style="font-family:'Arial Nova Cond Light','Arial Narrow',Arial,sans-serif;font-size:12px;font-weight:700;color:#111">TEMPO</div><div class="tempoLegal">104/106 rue Oberkampf (Cité du figuier) — 75011 Paris<br/>SAS au capital de 1 000 Euros - RCS Créteil N° 892 046 301 - APE 7112 B</div>{("<img class='footImg footRythme' src='" + logo_rythme + "' alt='' />") if logo_rythme else ""}</div>
         <div class="footRight"></div>
       </div>
     </section>
-  </div>
+  </template>
 
 {EDITOR_MEMO_MODAL_HTML}
 {QUALITY_MODAL_HTML}
@@ -2497,7 +2383,7 @@ body{{padding:14px 14px 14px 280px;}}
 <script>{ANALYSIS_MODAL_JS}</script>
 <script>{RANGE_PICKER_JS}</script>
 <script>{LAYOUT_CONTROLS_JS}</script>
-<script>{PAGE_SETUP_JS}</script>
+<script>{PAGINATION_JS}</script>
 <script>{ROW_CONTROL_JS}</script>
 <script>{RESIZE_COLUMNS_JS}</script>
 <script>{RESIZE_TOP_JS}</script>
